@@ -1,2 +1,272 @@
 # Pornjira
 00
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sheet Voice Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600&display=swap');
+        body { font-family: 'Sarabun', sans-serif; }
+        .recording { animation: pulse 1.5s infinite; }
+        @keyframes pulse {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-4 md:p-8">
+    <div class="max-w-2xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden">
+        <!-- Header -->
+        <div class="bg-green-600 p-6 text-white text-center">
+            <h1 class="text-2xl font-bold mb-2 flex justify-center items-center gap-2">
+                <i class="fas fa-file-excel"></i> Sheet Voice Assistant
+            </h1>
+            <p class="text-green-100 text-sm">เครื่องมือช่วยบันทึกเสียงและอ่านคำตอบสำหรับ Google Sheets</p>
+        </div>
+
+        <div class="p-6 space-y-8">
+            <!-- Section 1: Speech to Text -->
+            <section>
+                <h2 class="text-lg font-semibold text-slate-700 mb-4 flex items-center gap-2">
+                    <span class="bg-green-100 text-green-600 p-2 rounded-lg"><i class="fas fa-microphone"></i></span>
+                    บันทึกเสียงเป็นข้อความ (Speech to Text)
+                </h2>
+                <div class="flex flex-col gap-3">
+                    <div id="status" class="text-sm text-slate-500 italic">พร้อมรอรับคำสั่งเสียง...</div>
+                    <div class="relative">
+                        <textarea id="transcription-result" rows="3" 
+                            class="w-full p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:outline-none bg-slate-50 transition-all"
+                            placeholder="พูดเพื่อให้ข้อความปรากฏที่นี่..."></textarea>
+                        <button id="copy-btn" class="absolute bottom-3 right-3 text-slate-400 hover:text-green-600 transition-colors">
+                            <i class="fas fa-copy"></i> คัดลอก
+                        </button>
+                    </div>
+                    <button id="mic-btn" class="w-full py-4 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium transition-all flex justify-center items-center gap-2 shadow-lg active:scale-95">
+                        <i class="fas fa-play"></i> เริ่มพูด (ไทย/English)
+                    </button>
+                </div>
+            </section>
+
+            <div class="border-t border-slate-100"></div>
+
+            <!-- Section 2: Text to Speech -->
+            <section>
+                <h2 class="text-lg font-semibold text-slate-700 mb-4 flex items-center gap-2">
+                    <span class="bg-blue-100 text-blue-600 p-2 rounded-lg"><i class="fas fa-volume-up"></i></span>
+                    อ่านออกเสียงคำตอบ (AI Text to Speech)
+                </h2>
+                <div class="space-y-4">
+                    <textarea id="tts-input" rows="3" 
+                        class="w-full p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all"
+                        placeholder="วางคำตอบหรือสูตรจากชีตเพื่อให้ AI อ่านออกเสียง..."></textarea>
+                    
+                    <div class="grid grid-cols-2 gap-3">
+                        <select id="voice-select" class="p-3 border border-slate-200 rounded-xl bg-white text-sm focus:outline-none">
+                            <option value="Kore">Kore (เสียงหลัก)</option>
+                            <option value="Zephyr">Zephyr (เสียงทุ้ม)</option>
+                            <option value="Aoede">Aoede (เสียงใส)</option>
+                        </select>
+                        <button id="speak-btn" class="py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-all flex justify-center items-center gap-2 shadow-lg disabled:opacity-50">
+                            <i class="fas fa-headset"></i> ฟังเสียง AI
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Loading Indicator -->
+            <div id="loader" class="hidden flex items-center justify-center gap-2 text-blue-600 text-sm">
+                <i class="fas fa-circle-notch fa-spin"></i> กำลังประมวลผลเสียง...
+            </div>
+        </div>
+
+        <!-- Footer Info -->
+        <div class="bg-slate-50 p-4 border-t border-slate-100 text-center text-xs text-slate-400">
+            ใช้สำหรับการช่วยเหลือเบื้องต้นในการทำสูตรหรือบันทึกข้อมูลตาราง
+        </div>
+    </div>
+
+    <script>
+        const apiKey = ""; // API Key จากสภาพแวดล้อม
+        
+        // --- SPEECH TO TEXT (Web Speech API) ---
+        const micBtn = document.getElementById('mic-btn');
+        const transcriptionResult = document.getElementById('transcription-result');
+        const statusText = document.getElementById('status');
+        let isRecording = false;
+        let recognition;
+
+        if ('webkitSpeechRecognition' in window) {
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.lang = 'th-TH';
+
+            recognition.onstart = () => {
+                isRecording = true;
+                micBtn.classList.add('bg-red-500', 'recording');
+                micBtn.innerHTML = '<i class="fas fa-stop"></i> หยุดฟัง';
+                statusText.innerText = "กำลังฟัง...";
+            };
+
+            recognition.onresult = (event) => {
+                let transcript = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    transcript += event.results[i][0].transcript;
+                }
+                transcriptionResult.value = transcript;
+            };
+
+            recognition.onerror = (event) => {
+                console.error(event.error);
+                statusText.innerText = "เกิดข้อผิดพลาดในการฟัง";
+                stopRecording();
+            };
+
+            recognition.onend = () => {
+                stopRecording();
+                statusText.innerText = "พร้อมรอรับคำสั่งเสียง...";
+            };
+        } else {
+            micBtn.disabled = true;
+            statusText.innerText = "เบราว์เซอร์นี้ไม่รองรับ Speech Recognition";
+        }
+
+        function stopRecording() {
+            isRecording = false;
+            recognition.stop();
+            micBtn.classList.remove('bg-red-500', 'recording');
+            micBtn.innerHTML = '<i class="fas fa-play"></i> เริ่มพูด (ไทย/English)';
+        }
+
+        micBtn.addEventListener('click', () => {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                recognition.start();
+            }
+        });
+
+        document.getElementById('copy-btn').addEventListener('click', () => {
+            transcriptionResult.select();
+            document.execCommand('copy');
+            const originalText = document.getElementById('copy-btn').innerHTML;
+            document.getElementById('copy-btn').innerHTML = '<i class="fas fa-check text-green-500"></i>';
+            setTimeout(() => {
+                document.getElementById('copy-btn').innerHTML = originalText;
+            }, 2000);
+        });
+
+        // --- TEXT TO SPEECH (Gemini TTS API) ---
+        async function fetchTTS(text, voice) {
+            const loader = document.getElementById('loader');
+            const speakBtn = document.getElementById('speak-btn');
+            
+            loader.classList.remove('hidden');
+            speakBtn.disabled = true;
+
+            const payload = {
+                contents: [{ parts: [{ text: text }] }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: { voiceName: voice }
+                        }
+                    }
+                },
+                model: "gemini-2.5-flash-preview-tts"
+            };
+
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+
+            let retries = 0;
+            const maxRetries = 5;
+            
+            while (retries < maxRetries) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) throw new Error('API request failed');
+
+                    const result = await response.json();
+                    const pcmData = result.candidates[0].content.parts[0].inlineData.data;
+                    const sampleRate = parseInt(result.candidates[0].content.parts[0].inlineData.mimeType.match(/rate=(\d+)/)?.[1] || 24000);
+                    
+                    playPCM(pcmData, sampleRate);
+                    break;
+                } catch (error) {
+                    retries++;
+                    if (retries === maxRetries) {
+                        alert("ขออภัย ไม่สามารถสร้างเสียงได้ในขณะนี้ กรุณาลองใหม่ภายหลัง");
+                    }
+                    await new Promise(res => setTimeout(res, Math.pow(2, retries) * 1000));
+                } finally {
+                    if (retries === 0 || retries === maxRetries) {
+                        loader.classList.add('hidden');
+                        speakBtn.disabled = false;
+                    }
+                }
+            }
+        }
+
+        function playPCM(base64Data, sampleRate) {
+            const binaryString = atob(base64Data);
+            const len = binaryString.length;
+            const bytes = new Int16Array(len / 2);
+            for (let i = 0; i < len; i += 2) {
+                bytes[i / 2] = (binaryString.charCodeAt(i + 1) << 8) | binaryString.charCodeAt(i);
+            }
+
+            const wavHeader = createWavHeader(bytes.length * 2, sampleRate);
+            const blob = new Blob([wavHeader, bytes], { type: 'audio/wav' });
+            const audioUrl = URL.createObjectURL(blob);
+            const audio = new Audio(audioUrl);
+            audio.play();
+        }
+
+        function createWavHeader(dataLength, sampleRate) {
+            const buffer = new ArrayBuffer(44);
+            const view = new DataView(buffer);
+            const writeString = (offset, string) => {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            };
+
+            writeString(0, 'RIFF');
+            view.setUint32(4, 36 + dataLength, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(36, 'data');
+            view.setUint32(40, dataLength, true);
+            return buffer;
+        }
+
+        document.getElementById('speak-btn').addEventListener('click', () => {
+            const text = document.getElementById('tts-input').value;
+            const voice = document.getElementById('voice-select').value;
+            if (text.trim()) {
+                fetchTTS(text, voice);
+            } else {
+                alert("กรุณาใส่ข้อความที่ต้องการให้อ่าน");
+            }
+        });
+    </script>
+</body>
+</html>
